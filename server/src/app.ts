@@ -117,6 +117,7 @@ export const createApp = (opts: AppOptions = {}) => {
   const sourceStore = opts.sourceStore || new InMemoryWechatSourceStore();
   const wechatCollector = opts.wechatCollector || new WechatHtmlCollector();
   const articleSummarizer = opts.articleSummarizer || new LocalArticleSummarizer();
+  const fallbackArticleSummarizer = new LocalArticleSummarizer();
   const dailyBriefGenerator = opts.dailyBriefGenerator || new LocalDailyBriefGenerator();
   const institutions: Institution[] = [];
   const subscribers: Subscriber[] = [];
@@ -313,7 +314,16 @@ export const createApp = (opts: AppOptions = {}) => {
 
     let summary = (input.summary || "").trim();
     if (!summary) {
-      summary = await articleSummarizer.summarize({
+      summary = (await articleSummarizer.summarize({
+        institutionName,
+        title,
+        content: input.content,
+        link,
+        pubDate
+      })).trim();
+    }
+    if (!summary) {
+      summary = await fallbackArticleSummarizer.summarize({
         institutionName,
         title,
         content: input.content,

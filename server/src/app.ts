@@ -263,6 +263,56 @@ export const createApp = (opts: AppOptions = {}) => {
     res.json(a);
   });
 
+  app.post("/api/articles/import", (req, res) => {
+    const institutionName = typeof req.body?.institutionName === "string" ? req.body.institutionName.trim() : "";
+    const title = typeof req.body?.title === "string" ? req.body.title.trim() : "";
+    const summary = typeof req.body?.summary === "string" ? req.body.summary.trim() : "";
+    const content = typeof req.body?.content === "string" ? req.body.content : undefined;
+    const link = typeof req.body?.link === "string" ? req.body.link.trim() : "";
+    const pubDateRaw = typeof req.body?.pubDate === "string" ? req.body.pubDate.trim() : "";
+    const pubDate = pubDateRaw || new Date().toISOString();
+
+    if (!institutionName || !title || !link) {
+      return res.status(400).json({ error: "invalid_article_payload" });
+    }
+
+    let institution = institutions.find(x => x.name === institutionName);
+    if (!institution) {
+      institution = { id: genId(), name: institutionName };
+      institutions.push(institution);
+    }
+
+    const dup = articles.find(a =>
+      a.institutionId === institution.id &&
+      a.title === title &&
+      a.pubDate === pubDate
+    );
+    if (dup) {
+      return res.status(200).json({
+        created: false,
+        institution,
+        article: dup
+      });
+    }
+
+    const article: Article = {
+      id: genId(),
+      title,
+      summary,
+      content,
+      pubDate,
+      link,
+      institutionId: institution.id
+    };
+    articles.push(article);
+
+    return res.status(201).json({
+      created: true,
+      institution,
+      article
+    });
+  });
+
   app.get("/api/overview/latest", (req, res) => {
     if (!overviewLatest) return res.status(404).json({ error: "no_overview" });
     res.json(overviewLatest);

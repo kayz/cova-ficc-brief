@@ -12,11 +12,18 @@ describe("daily brief API", () => {
 
   it("can trigger and read latest daily brief", async () => {
     const app = createApp();
+    await request(app).post("/api/articles/import").send({
+      institutionName: "Test Research",
+      title: "Rates Update",
+      summary: "Bond yields moved lower.",
+      pubDate: "2026-03-06T03:30:00+08:00",
+      link: "https://example.com/rates-update"
+    });
     const run = await request(app)
       .post("/api/briefs/daily/run")
       .send({ runAt: "2026-03-06T04:00:00+08:00" });
     expect(run.status).toBe(200);
-    expect(run.body.articleCount).toBeGreaterThanOrEqual(0);
+    expect(run.body.articleCount).toBe(1);
 
     const latest = await request(app).get("/api/briefs/daily/latest");
     expect(latest.status).toBe(200);

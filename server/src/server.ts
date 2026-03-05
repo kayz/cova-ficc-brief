@@ -12,7 +12,8 @@ const start = async () => {
   const app = createApp({
     sourceStore: sourceStore.store,
     dailyBriefGenerator,
-    articleSummarizer
+    articleSummarizer,
+    readinessProbe: sourceStore.readinessProbe
   });
 
   const server = app.listen(port, () => {

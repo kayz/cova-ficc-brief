@@ -33,7 +33,7 @@
 ## 当前已实现接口（v0）
 
 - `GET /healthz`
-- `GET /readyz`
+- `GET /readyz`（`DATABASE_URL` 启用时会探测 Postgres 可用性）
 - `POST /api/sources/wechat/link`：录入公众号文章链接并接入源
 - `GET /api/sources`：查看已接入源列表
 - `POST /api/sources/wechat/sync`：按已接入微信源拉取并导入文章（含去重汇总）

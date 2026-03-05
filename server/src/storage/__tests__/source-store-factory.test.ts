@@ -10,6 +10,8 @@ describe("createSourceStoreFromEnv", () => {
     });
     expect(out.mode).toBe("memory");
     expect(out.store).toBeInstanceOf(InMemoryWechatSourceStore);
+    const ready = await out.readinessProbe();
+    expect(ready.ready).toBe(true);
   });
 
   it("returns postgres store when DATABASE_URL is present", async () => {
@@ -22,5 +24,21 @@ describe("createSourceStoreFromEnv", () => {
     expect(out.mode).toBe("postgres");
     expect(out.store).toBeInstanceOf(PostgresWechatSourceStore);
     expect(query).toHaveBeenCalled();
+    const ready = await out.readinessProbe();
+    expect(ready.ready).toBe(true);
+  });
+
+  it("returns not-ready when postgres probe fails", async () => {
+    const query = vi.fn()
+      .mockResolvedValueOnce({ rows: [] }) // schema init
+      .mockRejectedValueOnce(new Error("connection_lost")); // probe
+    const out = await createSourceStoreFromEnv({
+      env: { DATABASE_URL: "postgres://user:pass@localhost:5432/test" },
+      db: { query } as any
+    });
+
+    const ready = await out.readinessProbe();
+    expect(ready.ready).toBe(false);
+    expect(ready.reason).toBe("connection_lost");
   });
 });

@@ -12,6 +12,7 @@ type EnvLike = {
 export type SourceStoreFactoryResult = {
   mode: "memory" | "postgres";
   store: WechatSourceStore;
+  readinessProbe: () => Promise<{ ready: boolean; reason?: string }>;
   close?: () => Promise<void>;
 };
 
@@ -28,7 +29,8 @@ export const createSourceStoreFromEnv = async (
   if (!databaseUrl) {
     return {
       mode: "memory",
-      store: new InMemoryWechatSourceStore()
+      store: new InMemoryWechatSourceStore(),
+      readinessProbe: async () => ({ ready: true })
     };
   }
 
@@ -38,7 +40,18 @@ export const createSourceStoreFromEnv = async (
   if (input.db) {
     return {
       mode: "postgres",
-      store: new PostgresWechatSourceStore(db as never)
+      store: new PostgresWechatSourceStore(db as never),
+      readinessProbe: async () => {
+        try {
+          await db.query("SELECT 1");
+          return { ready: true };
+        } catch (err) {
+          return {
+            ready: false,
+            reason: err instanceof Error ? err.message : "db_probe_failed"
+          };
+        }
+      }
     };
   }
 
@@ -46,9 +59,19 @@ export const createSourceStoreFromEnv = async (
   return {
     mode: "postgres",
     store: new PostgresWechatSourceStore(pool),
+    readinessProbe: async () => {
+      try {
+        await pool.query("SELECT 1");
+        return { ready: true };
+      } catch (err) {
+        return {
+          ready: false,
+          reason: err instanceof Error ? err.message : "db_probe_failed"
+        };
+      }
+    },
     close: async () => {
       await pool.end();
     }
   };
 };
-

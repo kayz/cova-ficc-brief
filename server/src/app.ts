@@ -6,6 +6,7 @@ import { DailyBriefGenerator, LocalDailyBriefGenerator } from "./brief/dailyBrie
 import { getChinaDateKey, shouldRunDailyBriefAt } from "./brief/scheduler";
 import { InMemoryWechatSourceStore } from "./storage/inMemoryWechatSourceStore";
 import { WechatSourceStore } from "./storage/wechatSourceStore";
+import { ArticleSummarizer, LocalArticleSummarizer } from "./summary/articleSummarizer";
 import { WechatCollector, WechatHtmlCollector } from "./wechat/collector";
 
 type Institution = { id: string; name: string; iconUrl?: string };
@@ -26,6 +27,7 @@ type RefreshResult = { institutionsCount: number; articlesCount: number; added: 
 type AppOptions = {
   sourceStore?: WechatSourceStore;
   wechatCollector?: WechatCollector;
+  articleSummarizer?: ArticleSummarizer;
   dailyBriefGenerator?: DailyBriefGenerator;
   dailyBriefSchedulerEnabled?: boolean;
   weweBaseUrl?: string;
@@ -114,6 +116,7 @@ export const createApp = (opts: AppOptions = {}) => {
 
   const sourceStore = opts.sourceStore || new InMemoryWechatSourceStore();
   const wechatCollector = opts.wechatCollector || new WechatHtmlCollector();
+  const articleSummarizer = opts.articleSummarizer || new LocalArticleSummarizer();
   const dailyBriefGenerator = opts.dailyBriefGenerator || new LocalDailyBriefGenerator();
   const institutions: Institution[] = [];
   const subscribers: Subscriber[] = [];
@@ -277,7 +280,7 @@ export const createApp = (opts: AppOptions = {}) => {
   const getInstitutionNameById = (institutionId: string) =>
     institutions.find(x => x.id === institutionId)?.name || "";
 
-  const importArticle = (input: {
+  const importArticle = async (input: {
     institutionName: string;
     title: string;
     summary?: string;
@@ -288,7 +291,6 @@ export const createApp = (opts: AppOptions = {}) => {
     const institutionName = input.institutionName.trim();
     const title = input.title.trim();
     const link = input.link.trim();
-    const summary = (input.summary || "").trim();
     const pubDate = (input.pubDate || "").trim() || new Date().toISOString();
 
     if (!institutionName || !title || !link) {
@@ -309,10 +311,21 @@ export const createApp = (opts: AppOptions = {}) => {
       };
     }
 
+    let summary = (input.summary || "").trim();
+    if (!summary) {
+      summary = await articleSummarizer.summarize({
+        institutionName,
+        title,
+        content: input.content,
+        link,
+        pubDate
+      });
+    }
+
     const article: Article = {
       id: genId(),
       title,
-      summary,
+      summary: summary.trim(),
       content: input.content,
       pubDate,
       link,
@@ -360,7 +373,7 @@ export const createApp = (opts: AppOptions = {}) => {
         collectedArticles += collected.length;
 
         for (const item of collected) {
-          const result = importArticle({
+          const result = await importArticle({
             institutionName: source.displayName,
             title: item.title,
             summary: item.summary,
@@ -535,7 +548,7 @@ export const createApp = (opts: AppOptions = {}) => {
     return res.type("application/rss+xml").send(feed);
   });
 
-  app.post("/api/articles/import", (req, res) => {
+  app.post("/api/articles/import", async (req, res) => {
     const institutionName = typeof req.body?.institutionName === "string" ? req.body.institutionName.trim() : "";
     const title = typeof req.body?.title === "string" ? req.body.title.trim() : "";
     const summary = typeof req.body?.summary === "string" ? req.body.summary.trim() : "";
@@ -544,7 +557,7 @@ export const createApp = (opts: AppOptions = {}) => {
     const pubDateRaw = typeof req.body?.pubDate === "string" ? req.body.pubDate.trim() : "";
     const pubDate = pubDateRaw || new Date().toISOString();
 
-    const result = importArticle({
+    const result = await importArticle({
       institutionName,
       title,
       summary,

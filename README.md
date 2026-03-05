@@ -54,6 +54,9 @@
 - `GET /feeds/subscribers/:id/raw.rss`
 - `GET /feeds/subscribers/:id/summary.rss`
 
+补充说明：
+- `POST /api/articles/import` 的 `summary` 字段可选；缺失时系统会基于文章内容自动生成摘要。
+
 ## 当前环境变量（server）
 
 - `DATABASE_URL`：设置后自动使用 Postgres `wechat_sources` 存储

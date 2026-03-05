@@ -39,6 +39,10 @@
 - `GET /api/institutions`
 - `GET /api/institutions/:id/articles`
 - `GET /api/articles/:id`
+- `POST /api/subscribers`
+- `GET /api/subscribers`
+- `POST /api/subscriptions`
+- `GET /api/subscribers/:id/subscriptions`
 - `POST /api/rss/refresh`
 - `GET /api/overview/latest`
 - `POST /api/briefs/daily/run`
@@ -47,6 +51,8 @@
 - `POST /api/wewe/sync`
 - `GET /feeds/raw.rss`
 - `GET /feeds/summary.rss`
+- `GET /feeds/subscribers/:id/raw.rss`
+- `GET /feeds/subscribers/:id/summary.rss`
 
 ## 当前环境变量（server）
 

@@ -30,6 +30,34 @@
 1. RSS 订阅服务：对外提供公众号订阅能力与文章流。
 2. 每日简报服务：按日输出当日 FICC 市场专业简报（定时任务驱动）。
 
+## 当前已实现接口（v0）
+
+- `POST /api/sources/wechat/link`：录入公众号文章链接并接入源
+- `GET /api/sources`：查看已接入源列表
+- `POST /api/articles/import`：导入文章（测试/回灌入口）
+- `GET /api/institutions`
+- `GET /api/institutions/:id/articles`
+- `GET /api/articles/:id`
+- `POST /api/rss/refresh`
+- `GET /api/overview/latest`
+- `POST /api/briefs/daily/run`
+- `GET /api/briefs/daily/latest`
+- `GET /api/wewe/status`
+- `POST /api/wewe/sync`
+
+## 当前环境变量（server）
+
+- `DATABASE_URL`：设置后自动使用 Postgres `wechat_sources` 存储
+- `DAILY_BRIEF_ENABLE_SCHEDULER`：是否启用 04:00 自动简报调度
+- `COVA_BASE_URL`：设置后简报走 COVA HTTP 生成器
+- `COVA_EXPERT_ID`：默认 `cova-ficc-brief`
+- `COVA_AUTH_BEARER`：可选，COVA 接口 Bearer Token
+- `WEWE_RSS_BASE_URL`
+- `WEWE_RSS_FEED_IDS`
+- `WEWE_RSS_FEED_FORMAT`
+- `WEWE_SYNC_INTERVAL_MINUTES`
+- `WEWE_SYNC_ON_STARTUP`
+
 ## WeWe RSS 引入（已接入）
 
 - 后端已增加 WeWe 适配入口：

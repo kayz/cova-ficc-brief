@@ -41,4 +41,21 @@ describe("wechat article link source API", () => {
     expect(bad.status).toBe(400);
     expect(bad.body.error).toBe("invalid_wechat_article_url");
   });
+
+  it("lists sources by latest updated time desc", async () => {
+    const app = createApp();
+    const a1 = "https://mp.weixin.qq.com/s?__biz=MzA3OTYwNDk5Mw==&mid=1&idx=1&sn=abc";
+    const b1 = "https://mp.weixin.qq.com/s?__biz=MzB4OTYwNDk5Mw==&mid=1&idx=1&sn=def";
+    const b2 = "https://mp.weixin.qq.com/s?__biz=MzB4OTYwNDk5Mw==&mid=2&idx=1&sn=xyz";
+
+    await request(app).post("/api/sources/wechat/link").send({ articleUrl: a1 });
+    await request(app).post("/api/sources/wechat/link").send({ articleUrl: b1 });
+    await request(app).post("/api/sources/wechat/link").send({ articleUrl: b2 });
+
+    const list = await request(app).get("/api/sources");
+    expect(list.status).toBe(200);
+    expect(list.body.length).toBe(2);
+    expect(list.body[0].biz).toBe("MzB4OTYwNDk5Mw==");
+    expect(list.body[1].biz).toBe("MzA3OTYwNDk5Mw==");
+  });
 });

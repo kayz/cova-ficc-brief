@@ -259,7 +259,9 @@ export const createApp = (opts: AppOptions = {}) => {
   });
 
   app.get("/api/sources", (req, res) => {
-    res.json(Array.from(wechatSourcesByBiz.values()));
+    const sources = Array.from(wechatSourcesByBiz.values())
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    res.json(sources);
   });
 
   app.get("/api/institutions", (req, res) => {

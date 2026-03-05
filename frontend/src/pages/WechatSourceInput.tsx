@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import api from "../api";
 
 type LinkSourceResponse = {
@@ -7,12 +7,32 @@ type LinkSourceResponse = {
     channelId: string;
   };
 };
+type SourceListItem = {
+  id: string;
+  displayName: string;
+  channelId: string;
+  updatedAt: string;
+};
 
 export default function WechatSourceInput() {
   const [articleUrl, setArticleUrl] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [sources, setSources] = useState<SourceListItem[]>([]);
   const [successMsg, setSuccessMsg] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
+
+  const loadSources = async () => {
+    try {
+      const r = await api.get<SourceListItem[]>("/api/sources");
+      setSources(Array.isArray(r.data) ? r.data : []);
+    } catch {
+      setSources([]);
+    }
+  };
+
+  useEffect(() => {
+    void loadSources();
+  }, []);
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,6 +49,7 @@ export default function WechatSourceInput() {
     try {
       const r = await api.post<LinkSourceResponse>("/api/sources/wechat/link", { articleUrl: normalized });
       setSuccessMsg(`接入成功：${r.data.source.channelId}`);
+      void loadSources();
     } catch {
       setErrorMsg("接入失败，请检查链接格式");
     } finally {
@@ -77,6 +98,21 @@ export default function WechatSourceInput() {
       </form>
       {successMsg && <p style={{ marginTop: 12, color: "#166534" }}>{successMsg}</p>}
       {errorMsg && <p style={{ marginTop: 12, color: "#b91c1c" }}>{errorMsg}</p>}
+      <section style={{ marginTop: 24 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 10 }}>已接入源</h2>
+        {sources.length === 0 ? (
+          <p style={{ color: "#64748b" }}>暂无已接入源</p>
+        ) : (
+          <ul style={{ display: "grid", gap: 8 }}>
+            {sources.map(s => (
+              <li key={s.id} style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: 10 }}>
+                <div style={{ fontWeight: 600 }}>{s.displayName}</div>
+                <div style={{ color: "#475569", fontSize: 14 }}>{s.channelId}</div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </div>
   );
 }

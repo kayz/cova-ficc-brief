@@ -1,5 +1,5 @@
 import request from "supertest";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createApp } from "../app";
 
 describe("daily brief API", () => {
@@ -21,5 +21,27 @@ describe("daily brief API", () => {
     const latest = await request(app).get("/api/briefs/daily/latest");
     expect(latest.status).toBe(200);
     expect(latest.body.id).toBe(run.body.id);
+  });
+
+  it("uses injected brief generator for run", async () => {
+    const generateDailyBrief = vi.fn().mockReturnValue({
+      id: "brief_from_adapter",
+      title: "adapter brief",
+      content: "adapter content",
+      articleCount: 0,
+      fromAt: "2026-03-05T20:00:00.000Z",
+      toAt: "2026-03-06T20:00:00.000Z",
+      createdAt: "2026-03-06T20:00:01.000Z"
+    });
+    const app = createApp({
+      dailyBriefGenerator: {
+        generateDailyBrief
+      } as any
+    });
+
+    const run = await request(app).post("/api/briefs/daily/run").send({});
+    expect(run.status).toBe(200);
+    expect(generateDailyBrief).toHaveBeenCalled();
+    expect(run.body.id).toBe("brief_from_adapter");
   });
 });

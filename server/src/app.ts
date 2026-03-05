@@ -1,7 +1,8 @@
 import express from "express";
 import cors from "cors";
 import Parser from "rss-parser";
-import { createDailyBrief, DailyBrief } from "./brief/dailyBrief";
+import { DailyBrief } from "./brief/dailyBrief";
+import { DailyBriefGenerator, LocalDailyBriefGenerator } from "./brief/dailyBriefGenerator";
 import { getChinaDateKey, shouldRunDailyBriefAt } from "./brief/scheduler";
 import { InMemoryWechatSourceStore } from "./storage/inMemoryWechatSourceStore";
 import { WechatSourceStore } from "./storage/wechatSourceStore";
@@ -21,6 +22,7 @@ type FeedInput = { institutionId?: string; institutionName: string; feedUrl: str
 type RefreshResult = { institutionsCount: number; articlesCount: number; added: number };
 type AppOptions = {
   sourceStore?: WechatSourceStore;
+  dailyBriefGenerator?: DailyBriefGenerator;
   dailyBriefSchedulerEnabled?: boolean;
   weweBaseUrl?: string;
   weweFeedIds?: string[];
@@ -95,6 +97,7 @@ export const createApp = (opts: AppOptions = {}) => {
   app.use(express.json());
 
   const sourceStore = opts.sourceStore || new InMemoryWechatSourceStore();
+  const dailyBriefGenerator = opts.dailyBriefGenerator || new LocalDailyBriefGenerator();
   const institutions: Institution[] = [];
   const articles: Article[] = [];
   let overviewLatest: Overview | null = null;
@@ -278,7 +281,7 @@ export const createApp = (opts: AppOptions = {}) => {
       return res.status(400).json({ error: "invalid_run_at" });
     }
 
-    dailyBriefLatest = createDailyBrief(articles, runAt);
+    dailyBriefLatest = dailyBriefGenerator.generateDailyBrief(articles, runAt);
     dailyBriefLastRunDateKey = getChinaDateKey(runAt);
     return res.json(dailyBriefLatest);
   });
@@ -334,7 +337,7 @@ export const createApp = (opts: AppOptions = {}) => {
     const timer = setInterval(() => {
       const now = new Date();
       if (shouldRunDailyBriefAt(now, dailyBriefLastRunDateKey)) {
-        dailyBriefLatest = createDailyBrief(articles, now);
+        dailyBriefLatest = dailyBriefGenerator.generateDailyBrief(articles, now);
         dailyBriefLastRunDateKey = getChinaDateKey(now);
       }
     }, 60_000);

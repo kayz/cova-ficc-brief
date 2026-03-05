@@ -75,6 +75,8 @@
 - `WECHAT_SOURCE_SYNC_INTERVAL_MINUTES`：内置微信源同步间隔（分钟）
 - `WECHAT_SOURCE_SYNC_ON_STARTUP`：服务启动时触发一次内置微信源同步
 
+运行时会在启动阶段校验关键配置（`DATABASE_URL`、`COVA_BASE_URL`、`WEWE_*`、`PORT` 等），非法值会直接启动失败（fail-fast）。
+
 ## WeWe RSS 引入（已接入）
 
 - 后端已增加 WeWe 适配入口：

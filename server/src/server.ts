@@ -2,10 +2,13 @@ import { createApp } from "./app";
 import { createDailyBriefGeneratorFromEnv } from "./brief/dailyBriefGeneratorFactory";
 import { createSourceStoreFromEnv } from "./storage/sourceStoreFactory";
 import { createArticleSummarizerFromEnv } from "./summary/articleSummarizerFactory";
+import { validateRuntimeEnv } from "./config/runtimeConfig";
 
 const port = process.env.PORT ? Number(process.env.PORT) : 3000;
 
 const start = async () => {
+  validateRuntimeEnv(process.env);
+
   const sourceStore = await createSourceStoreFromEnv();
   const dailyBriefGenerator = createDailyBriefGeneratorFromEnv();
   const articleSummarizer = createArticleSummarizerFromEnv();

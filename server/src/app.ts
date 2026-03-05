@@ -1,6 +1,8 @@
 import express from "express";
 import cors from "cors";
 import Parser from "rss-parser";
+import { InMemoryWechatSourceStore } from "./storage/inMemoryWechatSourceStore";
+import { WechatSourceStore } from "./storage/wechatSourceStore";
 
 type Institution = { id: string; name: string; iconUrl?: string };
 type Article = {
@@ -15,19 +17,8 @@ type Article = {
 type Overview = { id: string; title: string; content: string; createdAt: string };
 type FeedInput = { institutionId?: string; institutionName: string; feedUrl: string; iconUrl?: string };
 type RefreshResult = { institutionsCount: number; articlesCount: number; added: number };
-type WechatSource = {
-  id: string;
-  expertId: "cova-ficc-brief";
-  sourceType: "wechat_article_link";
-  biz: string;
-  channelId: string;
-  displayName: string;
-  lastArticleUrl: string;
-  createdAt: string;
-  updatedAt: string;
-};
-
 type AppOptions = {
+  sourceStore?: WechatSourceStore;
   weweBaseUrl?: string;
   weweFeedIds?: string[];
   weweFeedFormat?: "rss" | "atom" | "json";
@@ -98,9 +89,9 @@ export const createApp = (opts: AppOptions = {}) => {
   app.use(cors());
   app.use(express.json());
 
+  const sourceStore = opts.sourceStore || new InMemoryWechatSourceStore();
   const institutions: Institution[] = [];
   const articles: Article[] = [];
-  const wechatSourcesByBiz = new Map<string, WechatSource>();
   let overviewLatest: Overview | null = null;
   let weweSyncRunning = false;
   let weweLastSyncAt = "";
@@ -226,7 +217,7 @@ export const createApp = (opts: AppOptions = {}) => {
     }
   };
 
-  app.post("/api/sources/wechat/link", (req, res) => {
+  app.post("/api/sources/wechat/link", async (req, res) => {
     const articleUrl = typeof req.body?.articleUrl === "string" ? req.body.articleUrl.trim() : "";
     const displayNameInput = typeof req.body?.displayName === "string" ? req.body.displayName.trim() : "";
     const parsed = parseWeChatArticleUrl(articleUrl);
@@ -234,33 +225,16 @@ export const createApp = (opts: AppOptions = {}) => {
       return res.status(400).json({ error: "invalid_wechat_article_url" });
     }
 
-    const bizKey = parsed.biz.toLowerCase();
-    const now = new Date().toISOString();
-    const existing = wechatSourcesByBiz.get(bizKey);
-    if (existing) {
-      existing.lastArticleUrl = parsed.normalizedUrl;
-      existing.updatedAt = now;
-      return res.status(200).json({ created: false, source: existing });
-    }
-
-    const source: WechatSource = {
-      id: genId(),
-      expertId: "cova-ficc-brief",
-      sourceType: "wechat_article_link",
+    const result = await sourceStore.upsertByBiz({
       biz: parsed.biz,
-      channelId: `wechat_${bizKey}`,
       displayName: displayNameInput || `WeChat-${parsed.biz}`,
-      lastArticleUrl: parsed.normalizedUrl,
-      createdAt: now,
-      updatedAt: now
-    };
-    wechatSourcesByBiz.set(bizKey, source);
-    return res.status(201).json({ created: true, source });
+      articleUrl: parsed.normalizedUrl
+    });
+    return res.status(result.created ? 201 : 200).json(result);
   });
 
-  app.get("/api/sources", (req, res) => {
-    const sources = Array.from(wechatSourcesByBiz.values())
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  app.get("/api/sources", async (req, res) => {
+    const sources = await sourceStore.listSources();
     res.json(sources);
   });
 

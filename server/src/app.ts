@@ -24,10 +24,12 @@ type Article = {
 type Overview = { id: string; title: string; content: string; createdAt: string };
 type FeedInput = { institutionId?: string; institutionName: string; feedUrl: string; iconUrl?: string };
 type RefreshResult = { institutionsCount: number; articlesCount: number; added: number };
+type ReadinessProbeResult = { ready: boolean; reason?: string };
 type AppOptions = {
   sourceStore?: WechatSourceStore;
   wechatCollector?: WechatCollector;
   articleSummarizer?: ArticleSummarizer;
+  readinessProbe?: () => Promise<ReadinessProbeResult> | ReadinessProbeResult;
   dailyBriefGenerator?: DailyBriefGenerator;
   dailyBriefSchedulerEnabled?: boolean;
   weweBaseUrl?: string;
@@ -127,6 +129,7 @@ export const createApp = (opts: AppOptions = {}) => {
   const wechatCollector = opts.wechatCollector || new WechatHtmlCollector();
   const articleSummarizer = opts.articleSummarizer || new LocalArticleSummarizer();
   const fallbackArticleSummarizer = new LocalArticleSummarizer();
+  const readinessProbe = opts.readinessProbe || (async () => ({ ready: true }));
   const dailyBriefGenerator = opts.dailyBriefGenerator || new LocalDailyBriefGenerator();
   const institutions: Institution[] = [];
   const subscribers: Subscriber[] = [];
@@ -401,6 +404,40 @@ export const createApp = (opts: AppOptions = {}) => {
       failures
     };
   };
+
+  app.get("/healthz", (req, res) => {
+    return res.json({
+      status: "ok",
+      service: "cova-ficc-brief",
+      time: new Date().toISOString()
+    });
+  });
+
+  app.get("/readyz", async (req, res) => {
+    try {
+      const probe = await readinessProbe();
+      if (probe.ready) {
+        return res.json({
+          status: "ready",
+          service: "cova-ficc-brief",
+          time: new Date().toISOString()
+        });
+      }
+      return res.status(503).json({
+        status: "not_ready",
+        reason: probe.reason || "unknown_reason",
+        service: "cova-ficc-brief",
+        time: new Date().toISOString()
+      });
+    } catch (err) {
+      return res.status(503).json({
+        status: "not_ready",
+        reason: err instanceof Error ? err.message : "probe_error",
+        service: "cova-ficc-brief",
+        time: new Date().toISOString()
+      });
+    }
+  });
 
   app.post("/api/sources/wechat/link", async (req, res) => {
     const articleUrl = typeof req.body?.articleUrl === "string" ? req.body.articleUrl.trim() : "";

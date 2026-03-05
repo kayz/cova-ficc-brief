@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import Parser from "rss-parser";
+import { createDailyBrief, DailyBrief } from "./brief/dailyBrief";
 import { InMemoryWechatSourceStore } from "./storage/inMemoryWechatSourceStore";
 import { WechatSourceStore } from "./storage/wechatSourceStore";
 
@@ -93,6 +94,7 @@ export const createApp = (opts: AppOptions = {}) => {
   const institutions: Institution[] = [];
   const articles: Article[] = [];
   let overviewLatest: Overview | null = null;
+  let dailyBriefLatest: DailyBrief | null = null;
   let weweSyncRunning = false;
   let weweLastSyncAt = "";
   let weweLastSyncError = "";
@@ -262,6 +264,22 @@ export const createApp = (opts: AppOptions = {}) => {
     const feeds: FeedInput[] = Array.isArray(req.body?.feeds) ? req.body.feeds : defaultManualFeeds;
     const result = await refreshFromFeeds(feeds);
     res.json(result);
+  });
+
+  app.post("/api/briefs/daily/run", (req, res) => {
+    const runAtRaw = typeof req.body?.runAt === "string" ? req.body.runAt.trim() : "";
+    const runAt = runAtRaw ? new Date(runAtRaw) : new Date();
+    if (!Number.isFinite(runAt.getTime())) {
+      return res.status(400).json({ error: "invalid_run_at" });
+    }
+
+    dailyBriefLatest = createDailyBrief(articles, runAt);
+    return res.json(dailyBriefLatest);
+  });
+
+  app.get("/api/briefs/daily/latest", (req, res) => {
+    if (!dailyBriefLatest) return res.status(404).json({ error: "no_daily_brief" });
+    return res.json(dailyBriefLatest);
   });
 
   app.get("/api/wewe/status", (req, res) => {

@@ -3,6 +3,7 @@ import { createDailyBriefGeneratorFromEnv } from "./brief/dailyBriefGeneratorFac
 import { createSourceStoreFromEnv } from "./storage/sourceStoreFactory";
 import { createArticleSummarizerFromEnv } from "./summary/articleSummarizerFactory";
 import { validateRuntimeEnv } from "./config/runtimeConfig";
+import { attachGracefulShutdown } from "./lifecycle/gracefulShutdown";
 
 const port = process.env.PORT ? Number(process.env.PORT) : 3000;
 
@@ -25,10 +26,9 @@ const start = async () => {
     });
   });
 
-  process.on("SIGINT", async () => {
-    server.close();
-    if (sourceStore.close) await sourceStore.close();
-    process.exit(0);
+  attachGracefulShutdown({
+    closeServer: cb => server.close(cb),
+    closeStore: sourceStore.close
   });
 };
 

@@ -77,6 +77,8 @@
 
 运行时会在启动阶段校验关键配置（`DATABASE_URL`、`COVA_BASE_URL`、`WEWE_*`、`PORT` 等），非法值会直接启动失败（fail-fast）。
 
+服务支持 `SIGINT`/`SIGTERM` 优雅关停：先停止 HTTP 接收，再释放数据库连接。
+
 ## WeWe RSS 引入（已接入）
 
 - 后端已增加 WeWe 适配入口：

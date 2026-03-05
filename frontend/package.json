@@ -1,0 +1,28 @@
+{
+    "name": "cova-ficc-brief-frontend",
+    "version": "0.1.0",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "dev": "vite",
+        "build": "vite build",
+        "preview": "vite preview"
+    },
+    "dependencies": {
+        "@tailwindcss/postcss": "^4.1.17",
+        "axios": "^1.7.7",
+        "react": "^18.3.1",
+        "react-dom": "^18.3.1",
+        "react-router-dom": "^6.26.2"
+    },
+    "devDependencies": {
+        "@types/react": "^18.3.7",
+        "@types/react-dom": "^18.3.2",
+        "@vitejs/plugin-react": "^4.3.2",
+        "autoprefixer": "^10.4.22",
+        "postcss": "^8.5.6",
+        "tailwindcss": "^4.1.17",
+        "typescript": "^5.6.3",
+        "vite": "^5.4.8"
+    }
+}

@@ -4,29 +4,20 @@ import Parser from "rss-parser";
 import { DailyBrief } from "./brief/dailyBrief";
 import { DailyBriefGenerator, LocalDailyBriefGenerator } from "./brief/dailyBriefGenerator";
 import { getChinaDateKey, shouldRunDailyBriefAt } from "./brief/scheduler";
+import { Article, ContentStore } from "./storage/contentStore";
+import { InMemoryContentStore } from "./storage/inMemoryContentStore";
 import { InMemoryWechatSourceStore } from "./storage/inMemoryWechatSourceStore";
 import { WechatSourceStore } from "./storage/wechatSourceStore";
 import { ArticleSummarizer, LocalArticleSummarizer } from "./summary/articleSummarizer";
 import { WechatCollector, WechatHtmlCollector } from "./wechat/collector";
 
-type Institution = { id: string; name: string; iconUrl?: string };
-type Subscriber = { id: string; name: string; createdAt: string };
-type Subscription = { id: string; subscriberId: string; institutionName: string; createdAt: string };
-type Article = {
-  id: string;
-  title: string;
-  summary: string;
-  content?: string;
-  pubDate: string;
-  link: string;
-  institutionId: string;
-};
 type Overview = { id: string; title: string; content: string; createdAt: string };
 type FeedInput = { institutionId?: string; institutionName: string; feedUrl: string; iconUrl?: string };
 type RefreshResult = { institutionsCount: number; articlesCount: number; added: number };
 type ReadinessProbeResult = { ready: boolean; reason?: string };
 type AppOptions = {
   sourceStore?: WechatSourceStore;
+  contentStore?: ContentStore;
   wechatCollector?: WechatCollector;
   articleSummarizer?: ArticleSummarizer;
   readinessProbe?: () => Promise<ReadinessProbeResult> | ReadinessProbeResult;
@@ -126,15 +117,12 @@ export const createApp = (opts: AppOptions = {}) => {
   app.use(express.json());
 
   const sourceStore = opts.sourceStore || new InMemoryWechatSourceStore();
+  const contentStore = opts.contentStore || new InMemoryContentStore();
   const wechatCollector = opts.wechatCollector || new WechatHtmlCollector();
   const articleSummarizer = opts.articleSummarizer || new LocalArticleSummarizer();
   const fallbackArticleSummarizer = new LocalArticleSummarizer();
   const readinessProbe = opts.readinessProbe || (async () => ({ ready: true }));
   const dailyBriefGenerator = opts.dailyBriefGenerator || new LocalDailyBriefGenerator();
-  const institutions: Institution[] = [];
-  const subscribers: Subscriber[] = [];
-  const subscriptions: Subscription[] = [];
-  const articles: Article[] = [];
   let overviewLatest: Overview | null = null;
   let dailyBriefLatest: DailyBrief | null = null;
   let dailyBriefLastRunDateKey: string | null = null;
@@ -158,16 +146,71 @@ export const createApp = (opts: AppOptions = {}) => {
     });
   };
 
+  const importArticle = async (input: {
+    institutionName: string;
+    title: string;
+    summary?: string;
+    content?: string;
+    link: string;
+    pubDate?: string;
+  }) => {
+    const institutionName = input.institutionName.trim();
+    const title = input.title.trim();
+    const link = input.link.trim();
+    const pubDate = (input.pubDate || "").trim() || new Date().toISOString();
+
+    if (!institutionName || !title || !link) {
+      return null;
+    }
+
+    const dup = await contentStore.findDuplicateArticle({
+      institutionName,
+      title,
+      pubDate
+    });
+    if (dup) {
+      return {
+        created: false,
+        institution: dup.institution,
+        article: dup.article
+      };
+    }
+
+    let summary = (input.summary || "").trim();
+    if (!summary) {
+      summary = (await articleSummarizer.summarize({
+        institutionName,
+        title,
+        content: input.content,
+        link,
+        pubDate
+      })).trim();
+    }
+    if (!summary) {
+      summary = await fallbackArticleSummarizer.summarize({
+        institutionName,
+        title,
+        content: input.content,
+        link,
+        pubDate
+      });
+    }
+
+    return contentStore.importArticle({
+      institutionName,
+      title,
+      summary: summary.trim(),
+      content: input.content,
+      pubDate,
+      link
+    });
+  };
+
   const refreshFromFeeds = async (feeds: FeedInput[]): Promise<RefreshResult> => {
     const parser = new Parser();
     const addedArticles: Article[] = [];
 
     for (const f of feeds) {
-      let inst = institutions.find(x => x.name === f.institutionName);
-      if (!inst) {
-        inst = { id: f.institutionId || genId(), name: f.institutionName, iconUrl: f.iconUrl };
-        institutions.push(inst);
-      }
       try {
         const feed = await parser.parseURL(f.feedUrl);
         for (const item of feed.items.slice(0, 50)) {
@@ -176,49 +219,51 @@ export const createApp = (opts: AppOptions = {}) => {
           const pubDate = String(item.pubDate || item.isoDate || new Date().toISOString());
           const contentSnippet = String(item.contentSnippet || "");
           const content = typeof item.content === "string" ? item.content : undefined;
-          const key = `${inst.id}|${title}|${pubDate}`;
-          if (articles.some(a => `${a.institutionId}|${a.title}|${a.pubDate}` === key)) continue;
-          const art: Article = {
-            id: genId(),
+
+          const out = await contentStore.importArticle({
+            institutionName: f.institutionName,
             title,
             summary: contentSnippet.slice(0, 280),
             content,
             pubDate,
-            link,
-            institutionId: inst.id
-          };
-          articles.push(art);
-          addedArticles.push(art);
+            link
+          });
+
+          if (out.created) {
+            addedArticles.push(out.article);
+          }
         }
       } catch {
       }
     }
 
     if (addedArticles.length === 0) {
+      const institutions = await contentStore.listInstitutions();
+      const institutionByName = new Map(institutions.map(inst => [inst.name, inst]));
+
       for (const f of feeds) {
-        const inst = institutions.find(x => x.name === f.institutionName);
+        const inst = institutionByName.get(f.institutionName);
         if (!inst) continue;
-        const existCount = articles.filter(a => a.institutionId === inst.id).length;
-        if (existCount === 0) {
+
+        const exist = await contentStore.listArticlesByInstitutionId(inst.id);
+        if (exist.length === 0) {
           const now = new Date();
-          const a1: Article = {
-            id: genId(),
+          const a1 = await contentStore.importArticle({
+            institutionName: inst.name,
             title: `${inst.name} 固收周报`,
             summary: "示例摘要，供开发验证使用",
             pubDate: now.toISOString(),
-            link: "#",
-            institutionId: inst.id
-          };
-          const a2: Article = {
-            id: genId(),
+            link: "#"
+          });
+          const a2 = await contentStore.importArticle({
+            institutionName: inst.name,
             title: `${inst.name} 市场快评`,
             summary: "示例摘要，供开发验证使用",
             pubDate: new Date(now.getTime() - 3600_000).toISOString(),
-            link: "#",
-            institutionId: inst.id
-          };
-          articles.push(a1, a2);
-          addedArticles.push(a1, a2);
+            link: "#"
+          });
+          if (a1.created) addedArticles.push(a1.article);
+          if (a2.created) addedArticles.push(a2.article);
         }
       }
     }
@@ -233,6 +278,8 @@ export const createApp = (opts: AppOptions = {}) => {
       };
     }
 
+    const institutions = await contentStore.listInstitutions();
+    const articles = await contentStore.listArticles();
     return {
       institutionsCount: institutions.length,
       articlesCount: articles.length,
@@ -261,12 +308,13 @@ export const createApp = (opts: AppOptions = {}) => {
       weweSyncRunning = false;
     }
   };
+
   const buildRssFeed = (
     req: express.Request,
     feedTitle: string,
     feedDescription: string,
     mapDescription: (article: Article) => string,
-    sourceArticles: Article[] = articles
+    sourceArticles: Article[]
   ) => {
     const base = `${req.protocol}://${req.get("host") || "localhost"}`;
     const sorted = [...sourceArticles].sort((a, b) => b.pubDate.localeCompare(a.pubDate));
@@ -280,85 +328,6 @@ export const createApp = (opts: AppOptions = {}) => {
     }).join("");
 
     return `<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>${escapeXml(feedTitle)}</title><link>${escapeXml(base)}</link><description>${escapeXml(feedDescription)}</description>${itemsXml}</channel></rss>`;
-  };
-
-  const findOrCreateInstitution = (institutionName: string): Institution => {
-    let institution = institutions.find(x => x.name === institutionName);
-    if (!institution) {
-      institution = { id: genId(), name: institutionName };
-      institutions.push(institution);
-    }
-    return institution;
-  };
-  const getInstitutionNameById = (institutionId: string) =>
-    institutions.find(x => x.id === institutionId)?.name || "";
-
-  const importArticle = async (input: {
-    institutionName: string;
-    title: string;
-    summary?: string;
-    content?: string;
-    link: string;
-    pubDate?: string;
-  }) => {
-    const institutionName = input.institutionName.trim();
-    const title = input.title.trim();
-    const link = input.link.trim();
-    const pubDate = (input.pubDate || "").trim() || new Date().toISOString();
-
-    if (!institutionName || !title || !link) {
-      return null;
-    }
-
-    const institution = findOrCreateInstitution(institutionName);
-    const dup = articles.find(a =>
-      a.institutionId === institution.id &&
-      a.title === title &&
-      a.pubDate === pubDate
-    );
-    if (dup) {
-      return {
-        created: false,
-        institution,
-        article: dup
-      };
-    }
-
-    let summary = (input.summary || "").trim();
-    if (!summary) {
-      summary = (await articleSummarizer.summarize({
-        institutionName,
-        title,
-        content: input.content,
-        link,
-        pubDate
-      })).trim();
-    }
-    if (!summary) {
-      summary = await fallbackArticleSummarizer.summarize({
-        institutionName,
-        title,
-        content: input.content,
-        link,
-        pubDate
-      });
-    }
-
-    const article: Article = {
-      id: genId(),
-      title,
-      summary: summary.trim(),
-      content: input.content,
-      pubDate,
-      link,
-      institutionId: institution.id
-    };
-    articles.push(article);
-    return {
-      created: true,
-      institution,
-      article
-    };
   };
 
   const runWechatSourceSync = async () => {
@@ -465,117 +434,108 @@ export const createApp = (opts: AppOptions = {}) => {
     return res.json(result);
   });
 
-  app.get("/api/institutions", (req, res) => {
+  app.get("/api/institutions", async (req, res) => {
+    const institutions = await contentStore.listInstitutions();
     res.json(institutions);
   });
 
-  app.post("/api/subscribers", (req, res) => {
+  app.post("/api/subscribers", async (req, res) => {
     const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
     if (!name) {
       return res.status(400).json({ error: "invalid_subscriber_payload" });
     }
-    const subscriber: Subscriber = {
-      id: genId(),
-      name,
-      createdAt: new Date().toISOString()
-    };
-    subscribers.push(subscriber);
+    const subscriber = await contentStore.createSubscriber(name);
     return res.status(201).json(subscriber);
   });
 
-  app.get("/api/subscribers", (req, res) => {
+  app.get("/api/subscribers", async (req, res) => {
+    const subscribers = await contentStore.listSubscribers();
     return res.json(subscribers);
   });
 
-  app.post("/api/subscriptions", (req, res) => {
+  app.post("/api/subscriptions", async (req, res) => {
     const subscriberId = typeof req.body?.subscriberId === "string" ? req.body.subscriberId.trim() : "";
     const institutionName = typeof req.body?.institutionName === "string" ? req.body.institutionName.trim() : "";
     if (!subscriberId || !institutionName) {
       return res.status(400).json({ error: "invalid_subscription_payload" });
     }
 
-    const subscriber = subscribers.find(x => x.id === subscriberId);
+    const subscriber = await contentStore.getSubscriberById(subscriberId);
     if (!subscriber) {
       return res.status(404).json({ error: "subscriber_not_found" });
     }
 
-    const keyInstitution = institutionName.toLowerCase();
-    const existing = subscriptions.find(x =>
-      x.subscriberId === subscriber.id &&
-      x.institutionName.toLowerCase() === keyInstitution
-    );
-    if (existing) {
-      return res.status(200).json({
-        created: false,
-        subscription: existing
-      });
-    }
-
-    const subscription: Subscription = {
-      id: genId(),
-      subscriberId: subscriber.id,
-      institutionName,
-      createdAt: new Date().toISOString()
-    };
-    subscriptions.push(subscription);
-    return res.status(201).json({
-      created: true,
-      subscription
+    const result = await contentStore.upsertSubscription({
+      subscriberId,
+      institutionName
     });
+
+    return res.status(result.created ? 201 : 200).json(result);
   });
 
-  app.get("/api/subscribers/:id/subscriptions", (req, res) => {
-    const subscriber = subscribers.find(x => x.id === req.params.id);
+  app.get("/api/subscribers/:id/subscriptions", async (req, res) => {
+    const subscriber = await contentStore.getSubscriberById(req.params.id);
     if (!subscriber) {
       return res.status(404).json({ error: "subscriber_not_found" });
     }
-    return res.json(subscriptions.filter(x => x.subscriberId === subscriber.id));
+    const subscriptions = await contentStore.listSubscriptionsBySubscriberId(subscriber.id);
+    return res.json(subscriptions);
   });
 
-  app.get("/api/institutions/:id/articles", (req, res) => {
+  app.get("/api/institutions/:id/articles", async (req, res) => {
     const id = req.params.id;
-    res.json(articles.filter(a => a.institutionId === id).sort((a, b) => b.pubDate.localeCompare(a.pubDate)));
+    const articles = await contentStore.listArticlesByInstitutionId(id);
+    res.json(articles);
   });
 
-  app.get("/api/articles/:id", (req, res) => {
-    const a = articles.find(x => x.id === req.params.id);
-    if (!a) return res.status(404).json({ error: "not_found" });
-    res.json(a);
+  app.get("/api/articles/:id", async (req, res) => {
+    const article = await contentStore.getArticleById(req.params.id);
+    if (!article) return res.status(404).json({ error: "not_found" });
+    res.json(article);
   });
 
-  app.get("/feeds/raw.rss", (req, res) => {
+  app.get("/feeds/raw.rss", async (req, res) => {
+    const articles = await contentStore.listArticles();
     const feed = buildRssFeed(
       req,
       "COVA FICC Brief - Raw Feed",
       "Raw articles collected by cova-ficc-brief.",
-      article => article.content || article.summary
+      article => article.content || article.summary,
+      articles
     );
     return res.type("application/rss+xml").send(feed);
   });
 
-  app.get("/feeds/summary.rss", (req, res) => {
+  app.get("/feeds/summary.rss", async (req, res) => {
+    const articles = await contentStore.listArticles();
     const feed = buildRssFeed(
       req,
       "COVA FICC Brief - Summary Feed",
       "Article summaries generated by cova-ficc-brief.",
-      article => article.summary
+      article => article.summary,
+      articles
     );
     return res.type("application/rss+xml").send(feed);
   });
 
-  app.get("/feeds/subscribers/:id/raw.rss", (req, res) => {
-    const subscriber = subscribers.find(x => x.id === req.params.id);
+  app.get("/feeds/subscribers/:id/raw.rss", async (req, res) => {
+    const subscriber = await contentStore.getSubscriberById(req.params.id);
     if (!subscriber) {
       return res.status(404).json({ error: "subscriber_not_found" });
     }
-    const subscribedInstitutions = new Set(
-      subscriptions
-        .filter(x => x.subscriberId === subscriber.id)
-        .map(x => x.institutionName.toLowerCase())
-    );
-    const scopedArticles = articles.filter(article =>
-      subscribedInstitutions.has(getInstitutionNameById(article.institutionId).toLowerCase())
-    );
+
+    const [subscriptions, allArticles, institutions] = await Promise.all([
+      contentStore.listSubscriptionsBySubscriberId(subscriber.id),
+      contentStore.listArticles(),
+      contentStore.listInstitutions()
+    ]);
+    const subscribedInstitutions = new Set(subscriptions.map(x => x.institutionName.toLowerCase()));
+    const institutionNameById = new Map(institutions.map(x => [x.id, x.name.toLowerCase()]));
+    const scopedArticles = allArticles.filter(article => {
+      const institutionName = institutionNameById.get(article.institutionId) || "";
+      return subscribedInstitutions.has(institutionName);
+    });
+
     const feed = buildRssFeed(
       req,
       `COVA FICC Brief - ${subscriber.name} Raw Feed`,
@@ -586,19 +546,24 @@ export const createApp = (opts: AppOptions = {}) => {
     return res.type("application/rss+xml").send(feed);
   });
 
-  app.get("/feeds/subscribers/:id/summary.rss", (req, res) => {
-    const subscriber = subscribers.find(x => x.id === req.params.id);
+  app.get("/feeds/subscribers/:id/summary.rss", async (req, res) => {
+    const subscriber = await contentStore.getSubscriberById(req.params.id);
     if (!subscriber) {
       return res.status(404).json({ error: "subscriber_not_found" });
     }
-    const subscribedInstitutions = new Set(
-      subscriptions
-        .filter(x => x.subscriberId === subscriber.id)
-        .map(x => x.institutionName.toLowerCase())
-    );
-    const scopedArticles = articles.filter(article =>
-      subscribedInstitutions.has(getInstitutionNameById(article.institutionId).toLowerCase())
-    );
+
+    const [subscriptions, allArticles, institutions] = await Promise.all([
+      contentStore.listSubscriptionsBySubscriberId(subscriber.id),
+      contentStore.listArticles(),
+      contentStore.listInstitutions()
+    ]);
+    const subscribedInstitutions = new Set(subscriptions.map(x => x.institutionName.toLowerCase()));
+    const institutionNameById = new Map(institutions.map(x => [x.id, x.name.toLowerCase()]));
+    const scopedArticles = allArticles.filter(article => {
+      const institutionName = institutionNameById.get(article.institutionId) || "";
+      return subscribedInstitutions.has(institutionName);
+    });
+
     const feed = buildRssFeed(
       req,
       `COVA FICC Brief - ${subscriber.name} Summary Feed`,
@@ -652,6 +617,7 @@ export const createApp = (opts: AppOptions = {}) => {
       return res.status(400).json({ error: "invalid_run_at" });
     }
 
+    const articles = await contentStore.listArticles();
     dailyBriefLatest = await dailyBriefGenerator.generateDailyBrief(articles, runAt);
     dailyBriefLastRunDateKey = getChinaDateKey(runAt);
     return res.json(dailyBriefLatest);
@@ -729,13 +695,13 @@ export const createApp = (opts: AppOptions = {}) => {
     const timer = setInterval(() => {
       const now = new Date();
       if (shouldRunDailyBriefAt(now, dailyBriefLastRunDateKey)) {
-        void dailyBriefGenerator.generateDailyBrief(articles, now)
-          .then(brief => {
-            dailyBriefLatest = brief;
-            dailyBriefLastRunDateKey = getChinaDateKey(now);
-          })
-          .catch(() => {
-          });
+        void (async () => {
+          const articles = await contentStore.listArticles();
+          const brief = await dailyBriefGenerator.generateDailyBrief(articles, now);
+          dailyBriefLatest = brief;
+          dailyBriefLastRunDateKey = getChinaDateKey(now);
+        })().catch(() => {
+        });
       }
     }, 60_000);
     if (typeof (timer as any).unref === "function") {

@@ -63,7 +63,7 @@
 
 ## 当前环境变量（server）
 
-- `DATABASE_URL`：设置后自动使用 Postgres `wechat_sources` 存储
+- `DATABASE_URL`：设置后自动使用 Postgres 持久化（`wechat_sources` + articles/subscribers/subscriptions）
 - `DAILY_BRIEF_ENABLE_SCHEDULER`：是否启用 04:00 自动简报调度
 - `COVA_BASE_URL`：设置后摘要与日报都走 COVA HTTP 适配器
 - `COVA_EXPERT_ID`：默认 `cova-ficc-brief`
@@ -113,13 +113,13 @@
   - 支持内置微信源定时同步（启动触发与间隔触发）。
   - WeWe 适配状态与手动同步入口。
 - 关键缺口：
-  - 文章、订阅者、订阅关系仍是内存存储（重启丢失）。
+  - 未提供数据库迁移版本管理（当前是启动时建表）。
   - 缺少任务队列、失败重试、采集/摘要作业审计。
   - 微信采集仍需增强（多文章抓取、增量游标、风控策略）。
   - COVA 目前是直连适配，未接入完整任务编排与治理。
   - 无生产级部署/监控/告警/备份方案。
 
-粗略完成度（考虑微信 RSS 真实约束后）：约 35%-45%。
+粗略完成度（考虑微信 RSS 真实约束后）：约 45%-55%。
 
 ## 结论：改造还是重建
 

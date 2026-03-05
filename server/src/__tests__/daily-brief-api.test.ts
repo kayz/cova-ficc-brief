@@ -24,7 +24,7 @@ describe("daily brief API", () => {
   });
 
   it("uses injected brief generator for run", async () => {
-    const generateDailyBrief = vi.fn().mockReturnValue({
+    const generateDailyBrief = vi.fn().mockResolvedValue({
       id: "brief_from_adapter",
       title: "adapter brief",
       content: "adapter content",

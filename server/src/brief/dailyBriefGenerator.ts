@@ -6,12 +6,11 @@ type ArticleLike = {
 };
 
 export interface DailyBriefGenerator {
-  generateDailyBrief(articles: ArticleLike[], runAt: Date): DailyBrief;
+  generateDailyBrief(articles: ArticleLike[], runAt: Date): Promise<DailyBrief>;
 }
 
 export class LocalDailyBriefGenerator implements DailyBriefGenerator {
-  generateDailyBrief(articles: ArticleLike[], runAt: Date): DailyBrief {
+  async generateDailyBrief(articles: ArticleLike[], runAt: Date): Promise<DailyBrief> {
     return createDailyBrief(articles, runAt);
   }
 }
-

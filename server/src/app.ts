@@ -274,14 +274,14 @@ export const createApp = (opts: AppOptions = {}) => {
     res.json(result);
   });
 
-  app.post("/api/briefs/daily/run", (req, res) => {
+  app.post("/api/briefs/daily/run", async (req, res) => {
     const runAtRaw = typeof req.body?.runAt === "string" ? req.body.runAt.trim() : "";
     const runAt = runAtRaw ? new Date(runAtRaw) : new Date();
     if (!Number.isFinite(runAt.getTime())) {
       return res.status(400).json({ error: "invalid_run_at" });
     }
 
-    dailyBriefLatest = dailyBriefGenerator.generateDailyBrief(articles, runAt);
+    dailyBriefLatest = await dailyBriefGenerator.generateDailyBrief(articles, runAt);
     dailyBriefLastRunDateKey = getChinaDateKey(runAt);
     return res.json(dailyBriefLatest);
   });
@@ -337,8 +337,13 @@ export const createApp = (opts: AppOptions = {}) => {
     const timer = setInterval(() => {
       const now = new Date();
       if (shouldRunDailyBriefAt(now, dailyBriefLastRunDateKey)) {
-        dailyBriefLatest = dailyBriefGenerator.generateDailyBrief(articles, now);
-        dailyBriefLastRunDateKey = getChinaDateKey(now);
+        void dailyBriefGenerator.generateDailyBrief(articles, now)
+          .then(brief => {
+            dailyBriefLatest = brief;
+            dailyBriefLastRunDateKey = getChinaDateKey(now);
+          })
+          .catch(() => {
+          });
       }
     }, 60_000);
     timer.unref();

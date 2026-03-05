@@ -35,6 +35,8 @@ type AppOptions = {
   weweFeedFormat?: "rss" | "atom" | "json";
   weweSyncIntervalMinutes?: number;
   weweSyncOnStartup?: boolean;
+  wechatSourceSyncIntervalMinutes?: number;
+  wechatSourceSyncOnStartup?: boolean;
 };
 
 const defaultManualFeeds: FeedInput[] = [
@@ -94,6 +96,11 @@ const loadOptions = (opts: AppOptions = {}) => {
   const weweFeedFormat = (allowedFeedFormats.has(weweFeedFormatRaw) ? weweFeedFormatRaw : "rss") as "rss" | "atom" | "json";
   const weweSyncIntervalMinutes = Number(opts.weweSyncIntervalMinutes ?? process.env.WEWE_SYNC_INTERVAL_MINUTES ?? "0");
   const weweSyncOnStartup = opts.weweSyncOnStartup ?? parseBoolean(process.env.WEWE_SYNC_ON_STARTUP, false);
+  const wechatSourceSyncIntervalMinutes = Number(
+    opts.wechatSourceSyncIntervalMinutes ?? process.env.WECHAT_SOURCE_SYNC_INTERVAL_MINUTES ?? "0"
+  );
+  const wechatSourceSyncOnStartup = opts.wechatSourceSyncOnStartup
+    ?? parseBoolean(process.env.WECHAT_SOURCE_SYNC_ON_STARTUP, false);
   const weweConfigured = Boolean(weweBaseUrl && weweFeedIds.length > 0);
   const dailyBriefSchedulerEnabled = opts.dailyBriefSchedulerEnabled ?? parseBoolean(process.env.DAILY_BRIEF_ENABLE_SCHEDULER, false);
 
@@ -104,6 +111,8 @@ const loadOptions = (opts: AppOptions = {}) => {
     weweFeedFormat,
     weweSyncIntervalMinutes,
     weweSyncOnStartup,
+    wechatSourceSyncIntervalMinutes,
+    wechatSourceSyncOnStartup,
     weweConfigured
   };
 };
@@ -349,28 +358,7 @@ export const createApp = (opts: AppOptions = {}) => {
     };
   };
 
-  app.post("/api/sources/wechat/link", async (req, res) => {
-    const articleUrl = typeof req.body?.articleUrl === "string" ? req.body.articleUrl.trim() : "";
-    const displayNameInput = typeof req.body?.displayName === "string" ? req.body.displayName.trim() : "";
-    const parsed = parseWeChatArticleUrl(articleUrl);
-    if (!parsed) {
-      return res.status(400).json({ error: "invalid_wechat_article_url" });
-    }
-
-    const result = await sourceStore.upsertByBiz({
-      biz: parsed.biz,
-      displayName: displayNameInput || `WeChat-${parsed.biz}`,
-      articleUrl: parsed.normalizedUrl
-    });
-    return res.status(result.created ? 201 : 200).json(result);
-  });
-
-  app.get("/api/sources", async (req, res) => {
-    const sources = await sourceStore.listSources();
-    res.json(sources);
-  });
-
-  app.post("/api/sources/wechat/sync", async (req, res) => {
+  const runWechatSourceSync = async () => {
     const sources = await sourceStore.listSources();
     let collectedArticles = 0;
     let importedArticles = 0;
@@ -405,13 +393,39 @@ export const createApp = (opts: AppOptions = {}) => {
       }
     }
 
-    return res.json({
+    return {
       sources: sources.length,
       collectedArticles,
       importedArticles,
       failedSources,
       failures
+    };
+  };
+
+  app.post("/api/sources/wechat/link", async (req, res) => {
+    const articleUrl = typeof req.body?.articleUrl === "string" ? req.body.articleUrl.trim() : "";
+    const displayNameInput = typeof req.body?.displayName === "string" ? req.body.displayName.trim() : "";
+    const parsed = parseWeChatArticleUrl(articleUrl);
+    if (!parsed) {
+      return res.status(400).json({ error: "invalid_wechat_article_url" });
+    }
+
+    const result = await sourceStore.upsertByBiz({
+      biz: parsed.biz,
+      displayName: displayNameInput || `WeChat-${parsed.biz}`,
+      articleUrl: parsed.normalizedUrl
     });
+    return res.status(result.created ? 201 : 200).json(result);
+  });
+
+  app.get("/api/sources", async (req, res) => {
+    const sources = await sourceStore.listSources();
+    res.json(sources);
+  });
+
+  app.post("/api/sources/wechat/sync", async (req, res) => {
+    const result = await runWechatSourceSync();
+    return res.json(result);
   });
 
   app.get("/api/institutions", (req, res) => {
@@ -645,11 +659,32 @@ export const createApp = (opts: AppOptions = {}) => {
       void runWeweSync(false).catch(() => {
       });
     }, ms);
-    timer.unref();
+    if (typeof (timer as any).unref === "function") {
+      (timer as any).unref();
+    }
   }
 
   if (options.weweConfigured && options.weweSyncOnStartup) {
     void runWeweSync(false).catch(() => {
+    });
+  }
+
+  if (
+    Number.isFinite(options.wechatSourceSyncIntervalMinutes) &&
+    options.wechatSourceSyncIntervalMinutes > 0
+  ) {
+    const ms = Math.floor(options.wechatSourceSyncIntervalMinutes * 60_000);
+    const timer = setInterval(() => {
+      void runWechatSourceSync().catch(() => {
+      });
+    }, ms);
+    if (typeof (timer as any).unref === "function") {
+      (timer as any).unref();
+    }
+  }
+
+  if (options.wechatSourceSyncOnStartup) {
+    void runWechatSourceSync().catch(() => {
     });
   }
 
@@ -666,7 +701,9 @@ export const createApp = (opts: AppOptions = {}) => {
           });
       }
     }, 60_000);
-    timer.unref();
+    if (typeof (timer as any).unref === "function") {
+      (timer as any).unref();
+    }
   }
 
   return app;

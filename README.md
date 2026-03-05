@@ -70,6 +70,8 @@
 - `WEWE_RSS_FEED_FORMAT`
 - `WEWE_SYNC_INTERVAL_MINUTES`
 - `WEWE_SYNC_ON_STARTUP`
+- `WECHAT_SOURCE_SYNC_INTERVAL_MINUTES`：内置微信源同步间隔（分钟）
+- `WECHAT_SOURCE_SYNC_ON_STARTUP`：服务启动时触发一次内置微信源同步
 
 ## WeWe RSS 引入（已接入）
 
@@ -94,6 +96,7 @@
   - 对外提供原文 RSS、摘要 RSS、订阅者范围 RSS。
   - 订阅者与订阅关系管理（API 级）。
   - 每日简报手动触发、latest 查询、04:00 调度守卫。
+  - 支持内置微信源定时同步（启动触发与间隔触发）。
   - WeWe 适配状态与手动同步入口。
 - 关键缺口：
   - 文章、订阅者、订阅关系仍是内存存储（重启丢失）。

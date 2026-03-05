@@ -45,6 +45,8 @@
 - `GET /api/briefs/daily/latest`
 - `GET /api/wewe/status`
 - `POST /api/wewe/sync`
+- `GET /feeds/raw.rss`
+- `GET /feeds/summary.rss`
 
 ## 当前环境变量（server）
 

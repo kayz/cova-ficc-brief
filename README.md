@@ -92,6 +92,13 @@
   - `WEWE_SYNC_ON_STARTUP`
 - 详细部署与接入说明见：[docs/wewe-rss-integration.md](./docs/wewe-rss-integration.md)
 
+## 生产部署
+
+- 后端镜像构建文件：[server/Dockerfile](./server/Dockerfile)
+- 生产 compose 栈（Server + Postgres）：[infra/prod/docker-compose.yml](./infra/prod/docker-compose.yml)
+- 部署说明：[infra/prod/README.md](./infra/prod/README.md)
+- 生产运行指南：[docs/production-deployment.md](./docs/production-deployment.md)
+
 ## 当前完成度评估（截至 2026-03-05）
 
 当前仓库仍是 POC，但已具备核心链路雏形。

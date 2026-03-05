@@ -34,6 +34,7 @@
 
 - `POST /api/sources/wechat/link`：录入公众号文章链接并接入源
 - `GET /api/sources`：查看已接入源列表
+- `POST /api/sources/wechat/sync`：按已接入微信源拉取并导入文章（含去重汇总）
 - `POST /api/articles/import`：导入文章（测试/回灌入口）
 - `GET /api/institutions`
 - `GET /api/institutions/:id/articles`

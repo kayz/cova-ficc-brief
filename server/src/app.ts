@@ -6,6 +6,7 @@ import { DailyBriefGenerator, LocalDailyBriefGenerator } from "./brief/dailyBrie
 import { getChinaDateKey, shouldRunDailyBriefAt } from "./brief/scheduler";
 import { InMemoryWechatSourceStore } from "./storage/inMemoryWechatSourceStore";
 import { WechatSourceStore } from "./storage/wechatSourceStore";
+import { WechatCollector, WechatHtmlCollector } from "./wechat/collector";
 
 type Institution = { id: string; name: string; iconUrl?: string };
 type Article = {
@@ -22,6 +23,7 @@ type FeedInput = { institutionId?: string; institutionName: string; feedUrl: str
 type RefreshResult = { institutionsCount: number; articlesCount: number; added: number };
 type AppOptions = {
   sourceStore?: WechatSourceStore;
+  wechatCollector?: WechatCollector;
   dailyBriefGenerator?: DailyBriefGenerator;
   dailyBriefSchedulerEnabled?: boolean;
   weweBaseUrl?: string;
@@ -97,6 +99,7 @@ export const createApp = (opts: AppOptions = {}) => {
   app.use(express.json());
 
   const sourceStore = opts.sourceStore || new InMemoryWechatSourceStore();
+  const wechatCollector = opts.wechatCollector || new WechatHtmlCollector();
   const dailyBriefGenerator = opts.dailyBriefGenerator || new LocalDailyBriefGenerator();
   const institutions: Institution[] = [];
   const articles: Article[] = [];
@@ -227,6 +230,64 @@ export const createApp = (opts: AppOptions = {}) => {
     }
   };
 
+  const findOrCreateInstitution = (institutionName: string): Institution => {
+    let institution = institutions.find(x => x.name === institutionName);
+    if (!institution) {
+      institution = { id: genId(), name: institutionName };
+      institutions.push(institution);
+    }
+    return institution;
+  };
+
+  const importArticle = (input: {
+    institutionName: string;
+    title: string;
+    summary?: string;
+    content?: string;
+    link: string;
+    pubDate?: string;
+  }) => {
+    const institutionName = input.institutionName.trim();
+    const title = input.title.trim();
+    const link = input.link.trim();
+    const summary = (input.summary || "").trim();
+    const pubDate = (input.pubDate || "").trim() || new Date().toISOString();
+
+    if (!institutionName || !title || !link) {
+      return null;
+    }
+
+    const institution = findOrCreateInstitution(institutionName);
+    const dup = articles.find(a =>
+      a.institutionId === institution.id &&
+      a.title === title &&
+      a.pubDate === pubDate
+    );
+    if (dup) {
+      return {
+        created: false,
+        institution,
+        article: dup
+      };
+    }
+
+    const article: Article = {
+      id: genId(),
+      title,
+      summary,
+      content: input.content,
+      pubDate,
+      link,
+      institutionId: institution.id
+    };
+    articles.push(article);
+    return {
+      created: true,
+      institution,
+      article
+    };
+  };
+
   app.post("/api/sources/wechat/link", async (req, res) => {
     const articleUrl = typeof req.body?.articleUrl === "string" ? req.body.articleUrl.trim() : "";
     const displayNameInput = typeof req.body?.displayName === "string" ? req.body.displayName.trim() : "";
@@ -246,6 +307,50 @@ export const createApp = (opts: AppOptions = {}) => {
   app.get("/api/sources", async (req, res) => {
     const sources = await sourceStore.listSources();
     res.json(sources);
+  });
+
+  app.post("/api/sources/wechat/sync", async (req, res) => {
+    const sources = await sourceStore.listSources();
+    let collectedArticles = 0;
+    let importedArticles = 0;
+    let failedSources = 0;
+    const failures: Array<{ sourceId: string; biz: string; message: string }> = [];
+
+    for (const source of sources) {
+      try {
+        const collected = await wechatCollector.collectBySource(source);
+        collectedArticles += collected.length;
+
+        for (const item of collected) {
+          const result = importArticle({
+            institutionName: source.displayName,
+            title: item.title,
+            summary: item.summary,
+            content: item.content,
+            link: item.link,
+            pubDate: item.pubDate
+          });
+          if (result?.created) {
+            importedArticles += 1;
+          }
+        }
+      } catch (err) {
+        failedSources += 1;
+        failures.push({
+          sourceId: source.id,
+          biz: source.biz,
+          message: err instanceof Error ? err.message : "unknown_error"
+        });
+      }
+    }
+
+    return res.json({
+      sources: sources.length,
+      collectedArticles,
+      importedArticles,
+      failedSources,
+      failures
+    });
   });
 
   app.get("/api/institutions", (req, res) => {
@@ -272,45 +377,20 @@ export const createApp = (opts: AppOptions = {}) => {
     const pubDateRaw = typeof req.body?.pubDate === "string" ? req.body.pubDate.trim() : "";
     const pubDate = pubDateRaw || new Date().toISOString();
 
-    if (!institutionName || !title || !link) {
-      return res.status(400).json({ error: "invalid_article_payload" });
-    }
-
-    let institution = institutions.find(x => x.name === institutionName);
-    if (!institution) {
-      institution = { id: genId(), name: institutionName };
-      institutions.push(institution);
-    }
-
-    const dup = articles.find(a =>
-      a.institutionId === institution.id &&
-      a.title === title &&
-      a.pubDate === pubDate
-    );
-    if (dup) {
-      return res.status(200).json({
-        created: false,
-        institution,
-        article: dup
-      });
-    }
-
-    const article: Article = {
-      id: genId(),
+    const result = importArticle({
+      institutionName,
       title,
       summary,
       content,
-      pubDate,
       link,
-      institutionId: institution.id
-    };
-    articles.push(article);
-
-    return res.status(201).json({
-      created: true,
-      institution,
-      article
+      pubDate
     });
+
+    if (!result) {
+      return res.status(400).json({ error: "invalid_article_payload" });
+    }
+
+    return res.status(result.created ? 201 : 200).json(result);
   });
 
   app.get("/api/overview/latest", (req, res) => {

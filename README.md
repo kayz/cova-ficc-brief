@@ -15,6 +15,7 @@
 ## Engineering Workflow
 
 - Test-first mandatory workflow: [docs/development-workflow.md](./docs/development-workflow.md)
+- CI: `.github/workflows/ci.yml` 会在 `main` push/PR 自动执行 server/frontend 的 test + build
 
 ## 核心目标
 

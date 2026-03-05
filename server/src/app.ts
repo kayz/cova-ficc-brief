@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import Parser from "rss-parser";
 import { createDailyBrief, DailyBrief } from "./brief/dailyBrief";
+import { getChinaDateKey, shouldRunDailyBriefAt } from "./brief/scheduler";
 import { InMemoryWechatSourceStore } from "./storage/inMemoryWechatSourceStore";
 import { WechatSourceStore } from "./storage/wechatSourceStore";
 
@@ -20,6 +21,7 @@ type FeedInput = { institutionId?: string; institutionName: string; feedUrl: str
 type RefreshResult = { institutionsCount: number; articlesCount: number; added: number };
 type AppOptions = {
   sourceStore?: WechatSourceStore;
+  dailyBriefSchedulerEnabled?: boolean;
   weweBaseUrl?: string;
   weweFeedIds?: string[];
   weweFeedFormat?: "rss" | "atom" | "json";
@@ -73,8 +75,10 @@ const loadOptions = (opts: AppOptions = {}) => {
   const weweSyncIntervalMinutes = Number(opts.weweSyncIntervalMinutes ?? process.env.WEWE_SYNC_INTERVAL_MINUTES ?? "0");
   const weweSyncOnStartup = opts.weweSyncOnStartup ?? parseBoolean(process.env.WEWE_SYNC_ON_STARTUP, false);
   const weweConfigured = Boolean(weweBaseUrl && weweFeedIds.length > 0);
+  const dailyBriefSchedulerEnabled = opts.dailyBriefSchedulerEnabled ?? parseBoolean(process.env.DAILY_BRIEF_ENABLE_SCHEDULER, false);
 
   return {
+    dailyBriefSchedulerEnabled,
     weweBaseUrl,
     weweFeedIds,
     weweFeedFormat,
@@ -95,6 +99,7 @@ export const createApp = (opts: AppOptions = {}) => {
   const articles: Article[] = [];
   let overviewLatest: Overview | null = null;
   let dailyBriefLatest: DailyBrief | null = null;
+  let dailyBriefLastRunDateKey: string | null = null;
   let weweSyncRunning = false;
   let weweLastSyncAt = "";
   let weweLastSyncError = "";
@@ -274,6 +279,7 @@ export const createApp = (opts: AppOptions = {}) => {
     }
 
     dailyBriefLatest = createDailyBrief(articles, runAt);
+    dailyBriefLastRunDateKey = getChinaDateKey(runAt);
     return res.json(dailyBriefLatest);
   });
 
@@ -322,6 +328,17 @@ export const createApp = (opts: AppOptions = {}) => {
   if (options.weweConfigured && options.weweSyncOnStartup) {
     void runWeweSync(false).catch(() => {
     });
+  }
+
+  if (options.dailyBriefSchedulerEnabled) {
+    const timer = setInterval(() => {
+      const now = new Date();
+      if (shouldRunDailyBriefAt(now, dailyBriefLastRunDateKey)) {
+        dailyBriefLatest = createDailyBrief(articles, now);
+        dailyBriefLastRunDateKey = getChinaDateKey(now);
+      }
+    }, 60_000);
+    timer.unref();
   }
 
   return app;
